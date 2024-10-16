@@ -1,0 +1,116 @@
+import java.io.*;
+import java.net.*;
+import java.util.*;
+
+class CacheNode {
+    private final int capacity;
+    private LinkedHashMap<String, String> cache;
+
+    public CacheNode(int capacity) {
+        this.capacity = capacity;
+        this.cache = new LinkedHashMap<>(capacity, 0.75f, true) {
+            @Override
+            protected boolean removeEldestEntry(Map.Entry<String, String> eldest) {
+                return size() > capacity;
+            }
+        };
+    }
+
+    public synchronized String get(String key) {
+        return cache.getOrDefault(key, "Miss");
+    }
+
+    public synchronized void put(String key, String value) {
+        cache.put(key, value);
+    }
+
+    public synchronized void displayCache() {
+        System.out.println("Cache Atual: " + cache);
+    }
+}
+
+class CacheServer extends Thread {
+    private CacheNode cacheNode;
+    private ServerSocket serverSocket;
+
+    public CacheServer(int port, int capacity) throws IOException {
+        this.cacheNode = new CacheNode(capacity);
+        this.serverSocket = new ServerSocket(port);
+    }
+
+    @Override
+    public void run() {
+        System.out.println("Servidor de Cache rodando na porta: " + serverSocket.getLocalPort());
+
+        while (true) {
+            try (Socket socket = serverSocket.accept();
+                 BufferedReader input = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+                 PrintWriter output = new PrintWriter(socket.getOutputStream(), true)) {
+
+                String request = input.readLine();
+                if (request.startsWith("GET")) {
+                    String key = request.split(" ")[1];
+                    String value = cacheNode.get(key);
+                    output.println("Valor: " + value);
+                } else if (request.startsWith("PUT")) {
+                    String[] parts = request.split(" ");
+                    String key = parts[1];
+                    String value = parts[2];
+                    cacheNode.put(key, value);
+                    output.println("Adicionado: " + key + " -> " + value);
+                }
+
+                // Exibir estado do cache
+                cacheNode.displayCache();
+
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+}
+
+class CacheClient {
+    private final String serverAddress;
+    private final int serverPort;
+
+    public CacheClient(String serverAddress, int serverPort) {
+        this.serverAddress = serverAddress;
+        this.serverPort = serverPort;
+    }
+
+    public void put(String key, String value) throws IOException {
+        try (Socket socket = new Socket(serverAddress, serverPort);
+             PrintWriter output = new PrintWriter(socket.getOutputStream(), true)) {
+
+            output.println("PUT " + key + " " + value);
+        }
+    }
+
+    public String get(String key) throws IOException {
+        try (Socket socket = new Socket(serverAddress, serverPort);
+             PrintWriter output = new PrintWriter(socket.getOutputStream(), true);
+             BufferedReader input = new BufferedReader(new InputStreamReader(socket.getInputStream()))) {
+
+            output.println("GET " + key);
+            return input.readLine();
+        }
+    }
+}
+
+public class DistributedCacheSystem {
+    public static void main(String[] args) throws IOException {
+        CacheServer server = new CacheServer(12345, 3); 
+        server.start();
+
+        CacheClient client = new CacheClient("localhost", 12345);
+
+        client.put("1", "Primeiro");
+        client.put("2", "Segundo");
+        client.put("3", "Terceiro");
+        System.out.println(client.get("1")); // Cache hit
+        client.put("4", "Quarto"); // LRU (Least Recently Used)
+        System.out.println(client.get("2")); // Cache miss
+        System.out.println(client.get("3")); // Cache hit
+    }
+}
